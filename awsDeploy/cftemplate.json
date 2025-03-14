@@ -1,0 +1,306 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "CloudFormation template to deploy a configurable Amazon Cognito User Pool, App Client, and Identity Pool",
+  "Parameters": {
+    "UserPoolName": {
+      "Type": "String",
+      "Default": "CognitoUserPool",
+      "Description": "Name of the Cognito User Pool"
+    },
+    "IdentityPoolName": {
+      "Type": "String",
+      "Default": "CognitoIdentityPool",
+      "Description": "Name of the Cognito Identity Pool"
+    },
+    "UserPoolClientName": {
+      "Type": "String",
+      "Default": "CognitoUserPoolClientName",
+      "Description": "Name of the Cognito User Pool Client"
+    },
+    "UsernameAttributes": {
+      "Type": "CommaDelimitedList",
+      "Default": "email,phone_number",
+      "AllowedValues": [
+        "email",
+        "phone_number",
+        "preferred_username"
+      ],
+      "Description": "Specify which attributes should be used for login"
+    },
+    "AutoVerifyAttributes": {
+      "Type": "CommaDelimitedList",
+      "Default": "email",
+      "AllowedValues": [
+        "email",
+        "phone_number"
+      ],
+      "Description": "Specify which attributes should be auto-verified"
+    },
+    "MinimumPasswordLength": {
+      "Type": "Number",
+      "Default": 8,
+      "Description": "Minimum length of the password"
+    },
+    "RequireUppercase": {
+      "Type": "String",
+      "Default": "true",
+      "AllowedValues": [
+        "true",
+        "false"
+      ],
+      "Description": "Require at least one uppercase letter"
+    },
+    "RequireLowercase": {
+      "Type": "String",
+      "Default": "true",
+      "AllowedValues": [
+        "true",
+        "false"
+      ],
+      "Description": "Require at least one lowercase letter"
+    },
+    "RequireNumbers": {
+      "Type": "String",
+      "Default": "true",
+      "AllowedValues": [
+        "true",
+        "false"
+      ],
+      "Description": "Require at least one number"
+    },
+    "RequireSymbols": {
+      "Type": "String",
+      "Default": "false",
+      "AllowedValues": [
+        "true",
+        "false"
+      ],
+      "Description": "Require at least one special character"
+    },
+    "GenerateSecret": {
+      "Type": "String",
+      "Default": "true",
+      "AllowedValues": [
+        "true",
+        "false"
+      ],
+      "Description": "Whether to generate a client secret for App Client"
+    }
+  },
+  "Resources": {
+    "CognitoUserPool": {
+      "Type": "AWS::Cognito::UserPool",
+      "Properties": {
+        "UserPoolName": {
+          "Ref": "UserPoolName"
+        },
+        "UsernameAttributes": {
+          "Ref": "UsernameAttributes"
+        },
+        "AutoVerifiedAttributes": {
+          "Ref": "AutoVerifyAttributes"
+        },
+        "Policies": {
+          "PasswordPolicy": {
+            "MinimumLength": {
+              "Ref": "MinimumPasswordLength"
+            },
+            "RequireUppercase": {
+              "Ref": "RequireUppercase"
+            },
+            "RequireLowercase": {
+              "Ref": "RequireLowercase"
+            },
+            "RequireNumbers": {
+              "Ref": "RequireNumbers"
+            },
+            "RequireSymbols": {
+              "Ref": "RequireSymbols"
+            }
+          }
+        }
+      }
+    },
+    "CognitoUserPoolClient": {
+      "Type": "AWS::Cognito::UserPoolClient",
+      "Properties": {
+        "ClientName": {
+          "Ref": "UserPoolClientName"
+        },
+        "UserPoolId": {
+          "Ref": "CognitoUserPool"
+        },
+        "GenerateSecret": {
+          "Ref": "GenerateSecret"
+        },
+        "ExplicitAuthFlows": [
+          "ALLOW_USER_PASSWORD_AUTH",
+          "ALLOW_REFRESH_TOKEN_AUTH",
+          "ALLOW_USER_SRP_AUTH"
+        ]
+      }
+    },
+    "CognitoIdentityPool": {
+      "Type": "AWS::Cognito::IdentityPool",
+      "Properties": {
+        "IdentityPoolName": {
+          "Ref": "IdentityPoolName"
+        },
+        "AllowUnauthenticatedIdentities": false,
+        "CognitoIdentityProviders": [
+          {
+            "ClientId": {
+              "Ref": "CognitoUserPoolClient"
+            },
+            "ProviderName": {
+              "Fn::Sub": "cognito-idp.${AWS::Region}.amazonaws.com/${CognitoUserPool}"
+            }
+          }
+        ]
+      }
+    },
+    "CognitoIdentityPoolRoleAttachment": {
+      "Type": "AWS::Cognito::IdentityPoolRoleAttachment",
+      "Properties": {
+        "IdentityPoolId": {
+          "Ref": "CognitoIdentityPool"
+        },
+        "Roles": {
+          "authenticated": {
+            "Fn::GetAtt": [
+              "CognitoAuthRole",
+              "Arn"
+            ]
+          },
+          "unauthenticated": {
+            "Fn::GetAtt": [
+              "CognitoUnauthRole",
+              "Arn"
+            ]
+          }
+        }
+      }
+    },
+    "CognitoAuthRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "CognitoAuthenticatedRole",
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Federated": "cognito-identity.amazonaws.com"
+              },
+              "Action": "sts:AssumeRoleWithWebIdentity",
+              "Condition": {
+                "StringEquals": {
+                  "cognito-identity.amazonaws.com:aud": {
+                    "Ref": "CognitoIdentityPool"
+                  }
+                },
+                "ForAnyValue:StringLike": {
+                  "cognito-identity.amazonaws.com:amr": "authenticated"
+                }
+              }
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "CognitoAuthenticatedPolicy",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "mobileanalytics:PutEvents",
+                    "cognito-sync:*",
+                    "cognito-identity:*"
+                  ],
+                  "Resource": "*"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "CognitoUnauthRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "CognitoUnauthenticatedRole",
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Federated": "cognito-identity.amazonaws.com"
+              },
+              "Action": "sts:AssumeRoleWithWebIdentity",
+              "Condition": {
+                "StringEquals": {
+                  "cognito-identity.amazonaws.com:aud": {
+                    "Ref": "CognitoIdentityPool"
+                  }
+                },
+                "ForAnyValue:StringLike": {
+                  "cognito-identity.amazonaws.com:amr": "unauthenticated"
+                }
+              }
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "CognitoUnauthenticatedPolicy",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "cognito-sync:*"
+                  ],
+                  "Resource": "*"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "Outputs": {
+    "UserPoolId": {
+      "Description": "The ID of the Cognito User Pool",
+      "Value": {
+        "Ref": "CognitoUserPool"
+      }
+    },
+    "UserPoolClientId": {
+      "Description": "The App Client ID",
+      "Value": {
+        "Ref": "CognitoUserPoolClient"
+      }
+    },
+    "UserPoolClientSecret": {
+      "Description": "The App Client Secret",
+      "Value": {
+        "Fn::GetAtt": [
+          "CognitoUserPoolClient",
+          "ClientSecret"
+        ]
+      }
+    },
+    "IdentityPoolId": {
+      "Description": "The Cognito Identity Pool ID",
+      "Value": {
+        "Ref": "CognitoIdentityPool"
+      }
+    }
+  }
+}

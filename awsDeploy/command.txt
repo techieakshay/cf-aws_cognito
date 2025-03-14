@@ -1,0 +1,1 @@
+awsDeploy % aws cloudformation create-stack --stack-name appcognitoclient --template-body file://cftemplate.json --capabilities CAPABILITY_NAMED_IAM --profile local
